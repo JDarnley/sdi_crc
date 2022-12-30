@@ -5,6 +5,8 @@
 
 #define NUM_SAMPLES (1920*2)
 
+void upipe_sdi_crc_sse4(uint8_t *data, uintptr_t len, uint32_t *crc);
+
 static void randomise_buffers(uint16_t *src0, int len)
 {
     for (int i = 0; i < len; i++) {
@@ -107,7 +109,9 @@ int main(int argc, char **argv)
     uint8_t c0_packed[NUM_SAMPLES*5/8], y0_packed[NUM_SAMPLES*5/8];
     int packed60_len = (NUM_SAMPLES / 2) * 10 / 60;
     uint64_t c0_packed60[packed60_len], y0_packed60[packed60_len];
-    uint32_t crc_c_ref = 0, crc_y_ref = 0, crc_c_packed = 0, crc_y_packed = 0,
+    uint32_t crc_c_ref = 0, crc_y_ref = 0,
+             crc_c_packed = 0, crc_y_packed = 0,
+             crc_c_packed_asm = 0, crc_y_packed_asm = 0,
              crc_c_packed60 = 0, crc_y_packed60 = 0;
 
     srand(time(NULL));
@@ -122,6 +126,9 @@ int main(int argc, char **argv)
     crc_c_packed = crc_update_packed(crc_c_packed, c0_packed, NUM_SAMPLES*5/8);
     crc_y_packed = crc_update_packed(crc_y_packed, y0_packed, NUM_SAMPLES*5/8);
 
+    upipe_sdi_crc_sse4(c0_packed, NUM_SAMPLES*5/8, &crc_c_packed_asm);
+    upipe_sdi_crc_sse4(y0_packed, NUM_SAMPLES*5/8, &crc_y_packed_asm);
+
     crc_c_packed60 = crc_update_packed60(crc_c_packed60, (uint64_t*)c0_packed60, packed60_len);
     crc_y_packed60 = crc_update_packed60(crc_y_packed60, (uint64_t*)y0_packed60, packed60_len);
 
@@ -134,6 +141,18 @@ int main(int argc, char **argv)
     if(crc_y_packed != crc_y_ref)
     {
         printf("crc_y_packed does not match crc_y_ref \n");
+        return -1;
+    }
+
+    if(crc_c_packed_asm != crc_c_ref)
+    {
+        printf("crc_c_packed_asm does not match crc_c_ref \n");
+        return -1;
+    }
+
+    if(crc_y_packed_asm != crc_y_ref)
+    {
+        printf("crc_y_packed_asm does not match crc_y_ref \n");
         return -1;
     }
 
