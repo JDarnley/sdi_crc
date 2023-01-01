@@ -45,6 +45,7 @@ static void upipe_uyvy_to_sdi_sep_10_c(uint8_t *c, uint8_t *y, const uint16_t *u
 static void upipe_uyvy_to_sdi_sep_60_c(uint64_t *c64, uint64_t *y64, const uint16_t *uyvy, uintptr_t pixels)
 {
     uintptr_t width = pixels * 2;
+    int extra = 0;
     for (int j = 0; j < width; j += 12) {
         uint64_t c1 = uyvy[j+0];
         uint64_t y1 = uyvy[j+1];
@@ -63,6 +64,10 @@ static void upipe_uyvy_to_sdi_sep_60_c(uint64_t *c64, uint64_t *y64, const uint1
 
         *c64 = (c6 << 50) | (c5 << 40) | (c4 << 30) | (c3 << 20) | (c2 << 10) | (c1 << 0);
         *y64 = (y6 << 50) | (y5 << 40) | (y4 << 30) | (y3 << 20) | (y2 << 10) | (y1 << 0);
+
+        extra ^= 4;
+        *c64 <<= extra;
+        *y64 <<= extra;
 
         c64++;
         y64++;
@@ -93,9 +98,12 @@ static uint32_t crc_update_packed(uint32_t crc, const uint8_t *data, size_t data
 
 static uint32_t crc_update_packed60(uint32_t crc, const uint64_t *data, size_t data_len)
 {
-    uint64_t crc64 = 0;
+    uint64_t crc64 = crc;
     for(int i = 0; i < data_len; i++) {
-        crc64 ^= data[i];
+        uint64_t w = data[i];
+        if (!(i & 1))
+            w >>= 4;
+        crc64 ^= w;
         for (int k = 0; k < 60; k++)
             crc64 = crc64 & 1 ? (crc64 >> 1) ^ 0x23000 : crc64 >> 1;
     }
