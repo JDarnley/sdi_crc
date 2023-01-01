@@ -134,11 +134,11 @@ int main(int argc, char **argv)
     crc_c_packed = crc_update_packed(crc_c_packed, c0_packed, NUM_SAMPLES*5/8);
     crc_y_packed = crc_update_packed(crc_y_packed, y0_packed, NUM_SAMPLES*5/8);
 
-    upipe_sdi_crc_sse4(c0_packed, NUM_SAMPLES*5/8, &crc_c_packed_asm);
-    upipe_sdi_crc_sse4(y0_packed, NUM_SAMPLES*5/8, &crc_y_packed_asm);
-
     crc_c_packed60 = crc_update_packed60(crc_c_packed60, (uint64_t*)c0_packed60, packed60_len);
     crc_y_packed60 = crc_update_packed60(crc_y_packed60, (uint64_t*)y0_packed60, packed60_len);
+
+    upipe_sdi_crc_sse4((uint8_t*)c0_packed60, packed60_len*8, &crc_c_packed_asm);
+    upipe_sdi_crc_sse4((uint8_t*)y0_packed60, packed60_len*8, &crc_y_packed_asm);
 
     if(crc_c_packed != crc_c_ref)
     {
