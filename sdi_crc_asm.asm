@@ -10,6 +10,36 @@ sdi_crc_k5_k6: dd 0x00000000, 0x14980000, 0x00000000, 0x40000 ;  x^14+64-1 mod P
 sdi_crc_mu dd 0x80040000, 0x5e405011, 0x14980559, 0x4c9bb5d5
 sdi_crc_p  dq 0x46001, 0
 
+mult: dw 1, 1, 4, 4, 16, 16, 64, 64
+
+shuf_A:
+%assign i 0
+%rep 4
+    db i+0, i+1
+    %assign i i+4
+%endrep
+%assign i 0
+%rep 4
+    db i+2, i+3
+    %assign i i+4
+%endrep
+
+shuf_B:
+%assign i 0
+%rep 4
+    db i+0, i+1, -1
+    %assign i i+4
+%endrep
+times 4 db -1
+
+shuf_C:
+%assign i 0
+%rep 4
+    db -1, i+2, i+3
+    %assign i i+4
+%endrep
+times 4 db -1
+
 SECTION .text
 
 ; a, b, constant, tmp
@@ -69,3 +99,27 @@ sdi_crc
 
 INIT_XMM avx
 sdi_crc
+
+; packing stub
+cglobal stub, 10, 10, 16, src
+
+movu   m0, [srcq]
+movu   m1, [srcq+16]
+movu   m2, [srcq+32]
+pmullw m0, [mult]
+pmullw m1, [mult]
+pmullw m2, [mult]
+pshufb m0, [shuf_A] ; cccc yyyy
+pshufb m1, [shuf_A] ; cccc yyyy
+pshufb m2, [shuf_A] ; cccc yyyy
+
+punpcklqdq m10, m0, m1 ; chroma
+punpckhqdq m11, m0, m1 ; luma
+
+pshufb m12, m10, [shuf_B]
+pshufb m13, m10, [shuf_C]
+pshufb m14, m11, [shuf_B]
+pshufb m15, m11, [shuf_C]
+
+por m0, m12, m13
+por m1, m14, m15
