@@ -74,6 +74,29 @@ static void upipe_uyvy_to_sdi_sep_60_c(uint64_t *c64, uint64_t *y64, const uint1
     }
 }
 
+#define L(value, shift) ((__uint128_t)(value) << shift)
+
+static void upipe_uyvy_to_sdi_sep_120_c(__uint128_t *c128, __uint128_t *y128, const uint16_t *uyvy, uintptr_t pixels)
+{
+    uintptr_t width = pixels * 2;
+    int extra = 0;
+    for (int j = 0; j < width; j += 24) {
+        __uint128_t c = L(uyvy[j+0],   0) | L(uyvy[j+2],   10) | L(uyvy[j+4],   20)
+                      | L(uyvy[j+6],  30) | L(uyvy[j+8],   40) | L(uyvy[j+10],  50)
+                      | L(uyvy[j+12], 60) | L(uyvy[j+14],  70) | L(uyvy[j+16],  80)
+                      | L(uyvy[j+18], 90) | L(uyvy[j+20], 100) | L(uyvy[j+22], 110);
+        __uint128_t y = L(uyvy[j+1],   0) | L(uyvy[j+3],   10) | L(uyvy[j+5],   20)
+                      | L(uyvy[j+7],  30) | L(uyvy[j+9],   40) | L(uyvy[j+11],  50)
+                      | L(uyvy[j+13], 60) | L(uyvy[j+15],  70) | L(uyvy[j+17],  80)
+                      | L(uyvy[j+19], 90) | L(uyvy[j+21], 100) | L(uyvy[j+23], 110);
+
+        //extra ^= 8;
+        *c128++ = c << extra;
+        *y128++ = y << extra;
+    }
+}
+
+
 static uint32_t crc_sdi_unpacked(uint32_t crc, const uint16_t *data, size_t data_len)
 {
     for(int i = 0; i < data_len; i++) {
@@ -121,6 +144,9 @@ int main(int argc, char **argv)
              crc_c_packed = 0, crc_y_packed = 0,
              crc_c_packed_asm = 0, crc_y_packed_asm = 0,
              crc_c_packed60 = 0, crc_y_packed60 = 0;
+
+    const int packed60_len = (NUM_SAMPLES / 2) * 10 / 60;
+    __uint128_t c0_packed120[packed60_len], y0_packed120[packed60_len];
 
     srand(time(NULL));
 

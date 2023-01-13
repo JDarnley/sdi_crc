@@ -10,35 +10,25 @@ sdi_crc_k5_k6: dd 0x00000000, 0x14980000, 0x00000000, 0x40000 ;  x^14+64-1 mod P
 sdi_crc_mu dd 0x80040000, 0x5e405011, 0x14980559, 0x4c9bb5d5
 sdi_crc_p  dq 0x46001, 0
 
-mult: dw 1, 1, 4, 4, 16, 16, 64, 64
+mult:
+    dw 1, 0, 4, 0, 16, 0, 64, 0
+    dw 0, 1, 0, 4, 0, 16, 0, 64
 
 shuf_A:
 %assign i 0
-%rep 4
-    db i+0, i+1
-    %assign i i+4
+%rep 2
+    db i+0, i+1, i+4, i+5, -1
+    %assign i i+8
 %endrep
-%assign i 0
-%rep 4
-    db i+2, i+3
-    %assign i i+4
-%endrep
+times 6 db -1
 
 shuf_B:
 %assign i 0
-%rep 4
-    db i+0, i+1, -1
-    %assign i i+4
+%rep 2
+    db -1, i+2, i+3, i+6, i+7
+    %assign i i+8
 %endrep
-times 4 db -1
-
-shuf_C:
-%assign i 0
-%rep 4
-    db -1, i+2, i+3
-    %assign i i+4
-%endrep
-times 4 db -1
+times 6 db -1
 
 SECTION .text
 
@@ -106,20 +96,37 @@ cglobal stub, 10, 10, 16, src
 movu   m0, [srcq]
 movu   m1, [srcq+16]
 movu   m2, [srcq+32]
-pmullw m0, [mult]
-pmullw m1, [mult]
-pmullw m2, [mult]
-pshufb m0, [shuf_A] ; cccc yyyy
-pshufb m1, [shuf_A] ; cccc yyyy
-pshufb m2, [shuf_A] ; cccc yyyy
 
-punpcklqdq m10, m0, m1 ; chroma
-punpckhqdq m11, m0, m1 ; luma
+pmaddwd m3, m0, [mult+0]  ; chroma
+pmaddwd m4, m0, [mult+16] ; luma
+pmaddwd m5, m1, [mult+0]  ; chroma
+pmaddwd m6, m1, [mult+16] ; luma
+pmaddwd m7, m2, [mult+0]  ; chroma
+pmaddwd m8, m2, [mult+16] ; luma
 
-pshufb m12, m10, [shuf_B]
-pshufb m13, m10, [shuf_C]
-pshufb m14, m11, [shuf_B]
-pshufb m15, m11, [shuf_C]
+packusdw m0, m3, m5 ; chroma
+packusdw m1, m4, m6 ; luma
+packusdw m7, m7 ; top chroma
+packusdw m8, m8 ; top luma
 
-por m0, m12, m13
-por m1, m14, m15
+pshufb  m9, m0, [shuf_A] ; chroma even
+pshufb m10, m0, [shuf_B] ; chroma odd
+por m0, m9, m10; packed chroma
+
+pshufb m11, m1, [shuf_A] ; luma even
+pshufb m12, m1, [shuf_B] ; luma odd
+por m1, m11, m12 ; packed luma
+
+pshufb m13, m7, [shuf_A] ; top chroma even
+pshufb m14, m7, [shuf_B] ; top chroma odd
+por m2, m13, m14 ; packed top chroma
+
+pshufb m3, m8, [shuf_A] ; top luma even
+pshufb m4, m8, [shuf_B] ; top luma odd
+por m3, m4 ; packed top luma
+
+pslldq m0, 6 ; shift chroma to top bytes
+pslldq m1, 6 ; shift luma to top bytes
+
+palignr m0, m2, m0, 6 ; TODO: check order
+palignr m1, m3, m1, 6 ; TODO: check order
