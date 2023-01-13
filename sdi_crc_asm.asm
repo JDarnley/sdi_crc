@@ -11,24 +11,24 @@ sdi_crc_mu dd 0x80040000, 0x5e405011, 0x14980559, 0x4c9bb5d5
 sdi_crc_p  dq 0x46001, 0
 
 mult:
-    dw 1, 0, 4, 0, 16, 0, 64, 0
-    dw 0, 1, 0, 4, 0, 16, 0, 64
+    dw 16,  0, 64,  0, 1, 0, 4, 0 ; chroma
+    dw  0, 16,  0, 64, 0, 1, 0, 4 ; luma
 
-shuf_A:
-%assign i 0
-%rep 2
-    db i+0, i+1, i+4, i+5, -1
-    %assign i i+8
-%endrep
-times 6 db -1
+shuf_lo_even:
+times 8 db -1
+db 0,1, -1, 4,5, 8,9, -1
 
-shuf_B:
-%assign i 0
-%rep 2
-    db -1, i+2, i+3, i+6, i+7
-    %assign i i+8
-%endrep
-times 6 db -1
+shuf_lo_odd:
+times 8 db -1
+db -1, 2,3, -1, 6,7, 10,11
+
+shuf_hi_even:
+db 0,1, 4,5, -1, 8,9, -1
+times 8 db -1
+
+shuf_hi_odd:
+db -1, 2,3, 6,7, -1, 10,11
+times 8 db -1
 
 SECTION .text
 
@@ -90,43 +90,45 @@ sdi_crc
 INIT_XMM avx
 sdi_crc
 
+INIT_YMM avx2
 ; packing stub
-cglobal stub, 10, 10, 16, src
+cglobal stub, 4, 5, 16, dstc, dsty, src, len, offset
+    shl lenq, 2
+    xor offsetd, offsetd
+    mova m15, [mult]
+    VBROADCASTI128 m14, [shuf_lo_even]
+    VBROADCASTI128 m13, [shuf_hi_even]
+    VBROADCASTI128 m12, [shuf_lo_odd]
+    VBROADCASTI128 m11, [shuf_hi_odd]
 
-movu   m0, [srcq]
-movu   m1, [srcq+16]
-movu   m2, [srcq+32]
+    .loop:
+        VBROADCASTI128 m0, [srcq+offsetq]
+        VBROADCASTI128 m1, [srcq+offsetq+16]
+        VBROADCASTI128 m2, [srcq+offsetq+32]
 
-pmaddwd m3, m0, [mult+0]  ; chroma
-pmaddwd m4, m0, [mult+16] ; luma
-pmaddwd m5, m1, [mult+0]  ; chroma
-pmaddwd m6, m1, [mult+16] ; luma
-pmaddwd m7, m2, [mult+0]  ; chroma
-pmaddwd m8, m2, [mult+16] ; luma
+        pmaddwd m0, m15 ; chroma | luma
+        pmaddwd m1, m15 ; chroma | luma
+        pmaddwd m2, m15 ; chroma | luma
 
-packusdw m0, m3, m5 ; chroma
-packusdw m1, m4, m6 ; luma
-packusdw m7, m7 ; top chroma
-packusdw m8, m8 ; top luma
+        packusdw m0, m1
+        packusdw m2, m2
+        palignr  m2, m2, m0, 12 ; prepend last 4 bytes of m0 onto m2
 
-pshufb  m9, m0, [shuf_A] ; chroma even
-pshufb m10, m0, [shuf_B] ; chroma odd
-por m0, m9, m10; packed chroma
+        pshufb m3, m0, m14
+        pshufb m4, m0, m12
+        pshufb m5, m2, m13
+        pshufb m6, m2, m11
 
-pshufb m11, m1, [shuf_A] ; luma even
-pshufb m12, m1, [shuf_B] ; luma odd
-por m1, m11, m12 ; packed luma
+        por m0, m3, m4
+        por m1, m5, m6
 
-pshufb m13, m7, [shuf_A] ; top chroma even
-pshufb m14, m7, [shuf_B] ; top chroma odd
-por m2, m13, m14 ; packed top chroma
+        palignr m0, m1, m0, 8 ; data is in center 120 bits
 
-pshufb m3, m8, [shuf_A] ; top luma even
-pshufb m4, m8, [shuf_B] ; top luma odd
-por m3, m4 ; packed top luma
-
-pslldq m0, 6 ; shift chroma to top bytes
-pslldq m1, 6 ; shift luma to top bytes
-
-palignr m0, m2, m0, 6 ; TODO: check order
-palignr m1, m3, m1, 6 ; TODO: check order
+        movu         [dstcq], xm0
+        vextracti128 [dstyq], ym0, 1
+        add dstcq, 16
+        add dstyq, 16
+        add offsetq, 48
+        cmp offsetq, lenq
+    jl .loop
+RET

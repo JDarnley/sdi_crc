@@ -2,10 +2,12 @@
 #include <time.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <string.h>
 
 #define NUM_SAMPLES (1920*2)
 
 void upipe_sdi_crc_sse4(uint8_t *data, uintptr_t len, uint32_t *crc);
+void upipe_stub_avx2(void *dstc, void *dsty, const uint16_t *uyvy, uintptr_t len);
 
 static void randomise_buffers(uint16_t *src0, int len)
 {
@@ -140,19 +142,30 @@ int main(int argc, char **argv)
     uint8_t c0_packed[NUM_SAMPLES*5/8], y0_packed[NUM_SAMPLES*5/8];
     int packed60_len = (NUM_SAMPLES / 2) * 10 / 60;
     uint64_t c0_packed60[packed60_len], y0_packed60[packed60_len];
+    uint64_t c0_packed120[packed60_len], y0_packed120[packed60_len];
     uint32_t crc_c_ref = 0, crc_y_ref = 0,
              crc_c_packed = 0, crc_y_packed = 0,
              crc_c_packed_asm = 0, crc_y_packed_asm = 0,
              crc_c_packed60 = 0, crc_y_packed60 = 0;
-
-    const int packed60_len = (NUM_SAMPLES / 2) * 10 / 60;
-    __uint128_t c0_packed120[packed60_len], y0_packed120[packed60_len];
-
     srand(time(NULL));
 
     randomise_buffers(src0, NUM_SAMPLES);
     upipe_uyvy_to_sdi_sep_10_c(c0_packed, y0_packed, src0, NUM_SAMPLES/2);
     upipe_uyvy_to_sdi_sep_60_c(c0_packed60, y0_packed60, src0, NUM_SAMPLES/2);
+    upipe_stub_avx2(c0_packed120, y0_packed120, src0, NUM_SAMPLES/2);
+
+#if 1
+    if (memcmp(c0_packed60, c0_packed120, sizeof c0_packed60)
+            || memcmp(y0_packed60, y0_packed120, sizeof y0_packed60)) {
+        printf("packed 120 asm does not match C\n");
+        return -1;
+    }
+#else
+    for (size_t i = 0; i < packed60_len; i++) {
+        if (c0_packed60[i] != c0_packed120[i])
+            printf("%3zu: %#18x != %-#18x\n", i, c0_packed60[i], c0_packed120[i]);
+    }
+#endif
 
     crc_c_ref = crc_sdi_unpacked(crc_c_ref, src0, NUM_SAMPLES/2);
     crc_y_ref = crc_sdi_unpacked(crc_y_ref, src0+1, NUM_SAMPLES/2);
