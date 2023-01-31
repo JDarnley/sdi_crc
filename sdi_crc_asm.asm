@@ -132,3 +132,87 @@ cglobal stub, 4, 5, 16, dstc, dsty, src, len, offset
         cmp offsetq, lenq
     jl .loop
 RET
+
+%macro END_1 3 ; accumulator, temp, constant
+    pclmulqdq %2, %1, %3, 0x00
+    pclmulqdq %1, %1, %3, 0x11
+    pxor      %1, %2
+%endmacro
+
+%macro END_2 4 ; acc, temp1, temp2, const
+    pclmulqdq %2, %1, %4, 0x01
+    pclmulqdq %3, %1, %4, 0x10
+    pxor      %2, %3
+%endmacro
+
+%macro END_3 3 ; acc, temp, const
+    psrldq    %2, 8
+    pclmulqdq %1, %3, 0x11
+    pxor      %1, %2
+%endmacro
+
+cglobal calc, 4, 5, 16, crcc, crcy, src, len, offset
+    shl lenq, 2
+    xor offsetd, offsetd
+    mova m15, [mult]
+    VBROADCASTI128 m14, [shuf_lo_even]
+    VBROADCASTI128 m13, [shuf_hi_even]
+    VBROADCASTI128 m12, [shuf_lo_odd]
+    VBROADCASTI128 m11, [shuf_hi_odd]
+
+    mova xm10, [sdi_crc_k3_k4]
+    pxor xm9, xm9 ; crc "accumulator"
+    pxor xm8, xm8
+
+    .loop:
+        VBROADCASTI128 m0, [srcq+offsetq]
+        VBROADCASTI128 m1, [srcq+offsetq+16]
+        VBROADCASTI128 m2, [srcq+offsetq+32]
+
+        pmaddwd m0, m15 ; chroma | luma
+        pmaddwd m1, m15 ; chroma | luma
+        pmaddwd m2, m15 ; chroma | luma
+
+        packusdw m0, m1
+        packusdw m2, m2
+        palignr  m2, m2, m0, 12 ; prepend last 4 bytes of m0 onto m2
+
+        pshufb m3, m0, m14
+        pshufb m4, m0, m12
+        pshufb m5, m2, m13
+        pshufb m6, m2, m11
+
+        por m0, m3, m4
+        por m1, m5, m6
+
+        palignr m0, m1, m0, 8 ; data is in center 120 bits
+
+        ; movu         [dstcq], xm0
+        ; vextracti128 [dstyq], ym0, 1
+
+        vextracti128 xm1, ym0, 1
+        REDUCE128 xm9, xm0, xm10, xm2
+        REDUCE128 xm8, xm1, xm10, xm3
+
+        add offsetq, 48
+        cmp offsetq, lenq
+    jl .loop
+
+    mova xm15, [sdi_crc_k5_k6]
+    mova xm14, [sdi_crc_mu]
+    mova xm13, [sdi_crc_p]
+
+    END_1 xm9, xm0, xm15
+    END_1 xm8, xm2, xm15
+
+    END_2 xm9, xm0, xm1, xm14
+    END_2 xm8, xm2, xm3, xm14
+    END_3 xm9, xm0, xm14
+    END_3 xm8, xm2, xm14
+
+    pclmulqdq  xm9, xm13, 0x00
+    pclmulqdq  xm8, xm13, 0x00
+
+    movd      [crccq], xm9
+    movd      [crcyq], xm8
+RET

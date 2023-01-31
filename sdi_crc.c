@@ -3,11 +3,13 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <string.h>
+#include <immintrin.h>
 
 #define NUM_SAMPLES (1920*2)
 
 void upipe_sdi_crc_sse4(uint8_t *data, uintptr_t len, uint32_t *crc);
 void upipe_stub_avx2(void *dstc, void *dsty, const uint16_t *uyvy, uintptr_t len);
+void upipe_calc_avx2(void *dstc, void *dsty, const uint16_t *uyvy, uintptr_t len);
 
 static void randomise_buffers(uint16_t *src0, int len)
 {
@@ -136,6 +138,98 @@ static uint32_t crc_update_packed60(uint32_t crc, const uint64_t *data, size_t d
     return (uint32_t)(crc64 & 0xffffffff);
 }
 
+__m256i broadcast128(const uint16_t* data) {
+    __m256i result;
+    asm("vbroadcasti128 %1, %0" : "=x"(result) :
+                                   "m"(*(const __m128i*)data));
+    return result;
+}
+
+__m128i xor_clmul(__m128i a, __m128i b) {
+    return _mm_xor_si128(_mm_clmulepi64_si128(a, b, 0x00),
+                         _mm_clmulepi64_si128(a, b, 0x11));
+}
+
+void jdintr(uint32_t *c, uint32_t *y, const uint16_t *data, uintptr_t len)
+{
+    __m128i c_xmm = _mm_setzero_si128(), y_xmm = _mm_setzero_si128();
+
+    for (size_t i = 0, j = 0; i < len*2; i += 24, j += 16) {
+        { // *= x^120 semi-mod P
+            __m128i k = _mm_setr_epi32(
+                0, 0x4b334000 /* x^120+64-1 mod P */,
+                0, 0x96d30000 /* x^120-1    mod P */);
+            c_xmm = xor_clmul(c_xmm, k);
+            y_xmm = xor_clmul(y_xmm, k);
+        }
+        { // +=
+            __m128i d1 = _mm_loadu_si128((__m128i*)(data + i));
+            __m256i d2 = broadcast128(data + i + 8);
+            __m256i d3 = broadcast128(data + i + 16);
+            __m128i k1 = _mm_setr_epi16(
+                16, 16, 64, 64, 1, 1, 4, 4);
+            __m256i k23 = _mm256_setr_epi16(
+                16,  0, 64,  0, 1, 0, 4, 0,
+                 0, 16,  0, 64, 0, 1, 0, 4);
+            d1 = _mm_mullo_epi16(k1, d1);
+            __m128i k4 = _mm_setr_epi8(
+                0,  1, -1,  8,  9, -1, -1, -1,
+                2,  3, -1, 10, 11, -1, -1, -1);
+            __m128i k5 = _mm_setr_epi8(
+                -1, 4,  5, -1, 12, 13, -1, -1,
+                -1, 6,  7, -1, 14, 15, -1, -1);
+            d1 = _mm_shuffle_epi8(d1, k4) ^ _mm_shuffle_epi8(d1, k5);
+            __m128i d1m; // Force a store to memory
+            asm("vmovdqa %1, %0" : "=m"(d1m) : "x"(d1) : "memory");
+            __m256i cdyd = _mm256_packus_epi32(
+                _mm256_madd_epi16(d2, k23),
+                _mm256_madd_epi16(d3, k23));
+            __m256i k6 = _mm256_setr_epi8(
+                -1, -1, -1, -1, -1,  0,  1, -1,
+                 4,  5,  8,  9, -1, 12, 13, -1,
+                -1, -1, -1, -1, -1,  0,  1, -1, 
+                 4,  5,  8,  9, -1, 12, 13, -1);
+            __m256i k7 = _mm256_setr_epi8(
+                -1, -1, -1, -1, -1, -1,  2,  3,
+                -1,  6,  7, 10, 11, -1, 14, 15,
+                -1, -1, -1, -1, -1, -1,  2,  3,
+                -1,  6,  7, 10, 11, -1, 14, 15);
+            cdyd = _mm256_shuffle_epi8(cdyd, k6)
+                 ^ _mm256_shuffle_epi8(cdyd, k7);
+            __m256i m; // Force a store to memory
+            asm("vmovdqa %1, %0" : "=m"(m) : "x"(cdyd) : "memory");
+            __m128i cd = _mm256_castsi256_si128(cdyd)
+                       ^ _mm_loadu_si64(&d1m);
+            __m128i yd = _mm_loadu_si128(1 + (__m128i*)&m)
+                       ^ _mm_loadu_si64(8 + (char*)&d1m);
+            c_xmm = _mm_xor_si128(c_xmm, cd);
+            y_xmm = _mm_xor_si128(y_xmm, yd);
+        }
+    }
+    { // *= x^14 semi-mod P
+        __m128i k = _mm_setr_epi32(
+            0, 0x14980000 /* x^14+64-1 mod P */,
+            0, 0x00040000 /* x^14-1    mod P */);
+        c_xmm = xor_clmul(c_xmm, k);
+        y_xmm = xor_clmul(y_xmm, k);
+    }
+    { // mod P
+        __m128i k = _mm_setr_epi32( /* x^128-1 div P */
+            0x14980559, 0x4c9bb5d5,
+            0x80040000, 0x5e405011);
+        c_xmm = _mm_xor_si128(_mm_srli_si128(xor_clmul(c_xmm, k), 8),
+                          _mm_clmulepi64_si128(c_xmm, k, 0x01));
+        y_xmm = _mm_xor_si128(_mm_srli_si128(xor_clmul(y_xmm, k), 8),
+                          _mm_clmulepi64_si128(y_xmm, k, 0x01));
+        __m128i P = _mm_cvtsi32_si128(0x46001 /* P */);
+        c_xmm = _mm_clmulepi64_si128(c_xmm, P, 0x00);
+        y_xmm = _mm_clmulepi64_si128(y_xmm, P, 0x00);
+    }
+    *c = _mm_cvtsi128_si32(c_xmm);
+    *y = _mm_cvtsi128_si32(y_xmm);
+}
+
+
 int main(int argc, char **argv)
 {
     uint16_t src0[NUM_SAMPLES];
@@ -146,7 +240,8 @@ int main(int argc, char **argv)
     uint32_t crc_c_ref = 0, crc_y_ref = 0,
              crc_c_packed = 0, crc_y_packed = 0,
              crc_c_packed_asm = 0, crc_y_packed_asm = 0,
-             crc_c_packed60 = 0, crc_y_packed60 = 0;
+             crc_c_packed60 = 0, crc_y_packed60 = 0,
+             crc_c_packed120 = 0, crc_y_packed120 = 0;
     srand(time(NULL));
 
     randomise_buffers(src0, NUM_SAMPLES);
@@ -178,6 +273,8 @@ int main(int argc, char **argv)
 
     upipe_sdi_crc_sse4((uint8_t*)c0_packed60, packed60_len*8, &crc_c_packed_asm);
     upipe_sdi_crc_sse4((uint8_t*)y0_packed60, packed60_len*8, &crc_y_packed_asm);
+
+    upipe_calc_avx2(&crc_c_packed120, &crc_y_packed120, src0, NUM_SAMPLES/2);
 
     if(crc_c_packed != crc_c_ref)
     {
@@ -212,6 +309,18 @@ int main(int argc, char **argv)
     if(crc_y_packed60 != crc_y_ref)
     {
         printf("crc_c_packed60 does not match crc_y_ref \n");
+        return -1;
+    }
+
+    if(crc_c_packed120 != crc_c_ref)
+    {
+        printf("crc_c_packed120 does not match crc_c_ref, ref: %x, test: %x \n");
+        return -1;
+    }
+
+    if(crc_y_packed120 != crc_y_ref)
+    {
+        printf("crc_y_packed120 does not match crc_y_ref, ref: %x, test: %x \n");
         return -1;
     }
 
