@@ -5,25 +5,38 @@ __m128i pmovzxwq(const uint16_t* data) {
     return out;
 }
 
-__m128i pack60x2_4(const uint16_t* data) {
+__m128i broadcastss(const uint16_t* data) {
     __m128i result;
-    result  = _mm_slli_epi64(pmovzxwq(data     ),  4);
-    result ^= _mm_slli_epi64(pmovzxwq(data +  2), 14);
-    result ^= _mm_slli_epi64(pmovzxwq(data +  4), 24);
-    result ^= _mm_slli_epi64(pmovzxwq(data +  6), 34);
-    result ^= _mm_slli_epi64(pmovzxwq(data +  8), 44);
-    result ^= _mm_slli_epi64(pmovzxwq(data + 10), 54);
+    asm("vbroadcastss %1, %0" : "=x"(result) :
+                                 "m"(*(const uint32_t*)data));
+    return result;
+}
+
+__m128i pack60x2_4(const uint16_t* data) {
+    __m128i shift4  = _mm_setr_epi32(1u <<  4, 0, 1u << ( 4+16), 0);
+    __m128i shift14 = _mm_setr_epi32(1u << 14, 0, 1u << (14+16), 0);
+    __m128i shift34 = _mm_setr_epi32(0, 1u <<  2, 0, 1u << ( 2+16));
+    __m128i shift44 = _mm_setr_epi32(0, 1u << 12, 0, 1u << (12+16));
+    __m128i result;
+    result  = _mm_madd_epi16(broadcastss(data     ), shift4);
+    result ^= _mm_madd_epi16(broadcastss(data +  2), shift14);
+    result ^= _mm_slli_epi64(   pmovzxwq(data +  4), 24);
+    result ^= _mm_madd_epi16(broadcastss(data +  6), shift34);
+    result ^= _mm_madd_epi16(broadcastss(data +  8), shift44);
+    result ^= _mm_slli_epi64(   pmovzxwq(data + 10), 54);
     return result;
 }
 
 __m128i pack60x2_0(const uint16_t* data) {
+    __m128i shift10 = _mm_setr_epi32(1u << 10, 0, 1u << (10+16), 0);
+    __m128i shift40 = _mm_setr_epi32(0, 1u << 8, 0, 1u << (8+16));
     __m128i result;
-    result  =                pmovzxwq(data     );
-    result ^= _mm_slli_epi64(pmovzxwq(data +  2), 10);
-    result ^= _mm_slli_epi64(pmovzxwq(data +  4), 20);
-    result ^= _mm_slli_epi64(pmovzxwq(data +  6), 30);
-    result ^= _mm_slli_epi64(pmovzxwq(data +  8), 40);
-    result ^= _mm_slli_epi64(pmovzxwq(data + 10), 50);
+    result  =                   pmovzxwq(data     );
+    result ^= _mm_madd_epi16(broadcastss(data +  2), shift10);
+    result ^= _mm_slli_epi64(   pmovzxwq(data +  4), 20);
+    result ^= _mm_slli_epi64(   pmovzxwq(data +  6), 30);
+    result ^= _mm_madd_epi16(broadcastss(data +  8), shift40);
+    result ^= _mm_slli_epi64(   pmovzxwq(data + 10), 50);
     return result;
 }
 
