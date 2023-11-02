@@ -5,7 +5,7 @@ __m128i pmovzxwq(const uint16_t* data) {
     return out;
 }
 
-__m128i pack60x2(const uint16_t* data) {
+__m128i pack60x2_4(const uint16_t* data) {
     __m128i result;
     result  = _mm_slli_epi64(pmovzxwq(data     ),  4);
     result ^= _mm_slli_epi64(pmovzxwq(data +  2), 14);
@@ -13,6 +13,17 @@ __m128i pack60x2(const uint16_t* data) {
     result ^= _mm_slli_epi64(pmovzxwq(data +  6), 34);
     result ^= _mm_slli_epi64(pmovzxwq(data +  8), 44);
     result ^= _mm_slli_epi64(pmovzxwq(data + 10), 54);
+    return result;
+}
+
+__m128i pack60x2_0(const uint16_t* data) {
+    __m128i result;
+    result  =                pmovzxwq(data     );
+    result ^= _mm_slli_epi64(pmovzxwq(data +  2), 10);
+    result ^= _mm_slli_epi64(pmovzxwq(data +  4), 20);
+    result ^= _mm_slli_epi64(pmovzxwq(data +  6), 30);
+    result ^= _mm_slli_epi64(pmovzxwq(data +  8), 40);
+    result ^= _mm_slli_epi64(pmovzxwq(data + 10), 50);
     return result;
 }
 
@@ -39,8 +50,8 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
             y = xor_clmul(y, k);
         }
         { // +=
-            __m128i lo = pack60x2(data + i);
-            __m128i hi = _mm_srli_epi64(pack60x2(data + i + 12), 4);
+            __m128i lo = pack60x2_4(data + i);
+            __m128i hi = pack60x2_0(data + i + 12);
             c = _mm_xor_si128(c, _mm_unpacklo_epi64(lo, hi));
             y = _mm_xor_si128(y, _mm_unpackhi_epi64(lo, hi));
         }
