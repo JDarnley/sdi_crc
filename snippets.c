@@ -17,24 +17,26 @@ __m128i pack60x2_4(const uint16_t* data) {
     __m128i shift14 = _mm_setr_epi32(1u << 14, 0, 1u << (14+16), 0);
     __m128i shift34 = _mm_setr_epi32(0, 1u <<  2, 0, 1u << ( 2+16));
     __m128i shift44 = _mm_setr_epi32(0, 1u << 12, 0, 1u << (12+16));
-    __m128i result;
+    __m128i result, hi;
     result  = _mm_madd_epi16(broadcastss(data     ), shift4);
     result ^= _mm_madd_epi16(broadcastss(data +  2), shift14);
-    result ^= _mm_slli_epi64(   pmovzxwq(data +  4), 24);
+    hi      = _mm_madd_epi16(broadcastss(data +  4), shift4);
     result ^= _mm_madd_epi16(broadcastss(data +  6), shift34);
     result ^= _mm_madd_epi16(broadcastss(data +  8), shift44);
-    result ^= _mm_slli_epi64(   pmovzxwq(data + 10), 54);
+    hi     ^= _mm_madd_epi16(broadcastss(data + 10), shift34);
+    result ^= _mm_slli_epi64(hi, 20);
     return result;
 }
 
 __m128i pack60x2_0(const uint16_t* data) {
     __m128i shift10 = _mm_setr_epi32(1u << 10, 0, 1u << (10+16), 0);
     __m128i shift40 = _mm_setr_epi32(0, 1u << 8, 0, 1u << (8+16));
-    __m128i result;
+    __m128i result, hi;
     result  =                   pmovzxwq(data     );
     result ^= _mm_madd_epi16(broadcastss(data +  2), shift10);
-    result ^= _mm_slli_epi64(   pmovzxwq(data +  4), 20);
-    result ^= _mm_slli_epi64(   pmovzxwq(data +  6), 30);
+    hi      =                   pmovzxwq(data +  4);
+    hi     ^= _mm_madd_epi16(broadcastss(data +  6), shift10);
+    result ^= _mm_slli_epi64(hi, 20);
     result ^= _mm_madd_epi16(broadcastss(data +  8), shift40);
     result ^= _mm_slli_epi64(   pmovzxwq(data + 10), 50);
     return result;
