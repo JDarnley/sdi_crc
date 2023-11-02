@@ -10,6 +10,10 @@ __m256i broadcast128(const uint16_t* data) {
     return result;
 }
 
+__m128i xor3(__m128i a, __m128i b, __m128i c) {
+    return _mm_ternarylogic_epi64(a, b, c, 0x96);
+}
+
 void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
     __m128i c = _mm_cvtsi32_si128(crcs[0]);
     __m128i y = _mm_cvtsi32_si128(crcs[1]);
@@ -20,14 +24,11 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
         y = _mm_clmulepi64_si128(y, k, 0x00);
     }
     for (size_t i = 0; i < n; i += 24) {
-        { // *= x^120 semi-mod P
+            // *= x^120 semi-mod P
+            // +=
             __m128i k = _mm_setr_epi32(
                 0, 0x4b334000 /* x^120+64-1 mod P */,
                 0, 0x96d30000 /* x^120-1    mod P */);
-            c = xor_clmul(c, k);
-            y = xor_clmul(y, k);
-        }
-        { // +=
             __m128i d1 = _mm_loadu_si128((__m128i*)(data + i));
             __m256i d2 = broadcast128(data + i + 8);
             __m256i d3 = broadcast128(data + i + 16);
@@ -67,9 +68,10 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
                        ^ _mm_loadu_si64(&d1m);
             __m128i yd = _mm_loadu_si128(1 + (__m128i*)&m)
                        ^ _mm_loadu_si64(8 + (char*)&d1m);
-            c = _mm_xor_si128(c, cd);
-            y = _mm_xor_si128(y, yd);
-        }
+            c = xor3(_mm_clmulepi64_si128(c, k, 0x00),
+                    _mm_clmulepi64_si128(c, k, 0x11), cd);
+            y = xor3(_mm_clmulepi64_si128(y, k, 0x00),
+                    _mm_clmulepi64_si128(y, k, 0x11), yd);
     }
     { // *= x^14 semi-mod P
         __m128i k = _mm_setr_epi32(
