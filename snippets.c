@@ -1,14 +1,19 @@
-uint64_t pack60(const uint16_t* data) {
-    return (((uint64_t)data[ 0]) <<  4) ^
-           (((uint64_t)data[ 2]) << 14) ^
-           (((uint64_t)data[ 4]) << 24) ^
-           (((uint64_t)data[ 6]) << 34) ^
-           (((uint64_t)data[ 8]) << 44) ^
-           (((uint64_t)data[10]) << 54);
+__m128i pmovzxwq(const uint16_t* data) {
+    __m128i out;
+    asm("vpmovzxwq %1, %0" : "=x"(out) :
+                              "m"(*(const uint32_t*)data));
+    return out;
 }
 
-__m128i pack120(const uint16_t* data) {
-    return _mm_set_epi64x(pack60(data + 12) >> 4, pack60(data));
+__m128i pack60x2(const uint16_t* data) {
+    __m128i result;
+    result  = _mm_slli_epi64(pmovzxwq(data     ),  4);
+    result ^= _mm_slli_epi64(pmovzxwq(data +  2), 14);
+    result ^= _mm_slli_epi64(pmovzxwq(data +  4), 24);
+    result ^= _mm_slli_epi64(pmovzxwq(data +  6), 34);
+    result ^= _mm_slli_epi64(pmovzxwq(data +  8), 44);
+    result ^= _mm_slli_epi64(pmovzxwq(data + 10), 54);
+    return result;
 }
 
 __m128i xor_clmul(__m128i a, __m128i b) {
@@ -34,8 +39,10 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
             y = xor_clmul(y, k);
         }
         { // +=
-            c = _mm_xor_si128(c, pack120(data + i));
-            y = _mm_xor_si128(y, pack120(data + i + 1));
+            __m128i lo = pack60x2(data + i);
+            __m128i hi = _mm_srli_epi64(pack60x2(data + i + 12), 4);
+            c = _mm_xor_si128(c, _mm_unpacklo_epi64(lo, hi));
+            y = _mm_xor_si128(y, _mm_unpackhi_epi64(lo, hi));
         }
     }
     { // *= x^14 semi-mod P
