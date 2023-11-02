@@ -22,3 +22,18 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
     crcs[0] = c;
     crcs[1] = y;
 }
+
+void crc_sdi(polynomial* crcs, const polynomial* data, size_t n) {
+    polynomial c = crcs[0];
+    polynomial y = crcs[1];
+    for (size_t i = 0; i < n; i += 2) {
+        c += data[i]   * x8;
+        y += data[i+1] * x8;
+        for (int k = 0; k < 10; k++) {
+            c = (c * x1) mod P; // P is x18 + x5 + x4 + x0
+            y = (y * x1) mod P;
+        }
+    }
+    crcs[0] = c;
+    crcs[1] = y;
+}
