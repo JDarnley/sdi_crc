@@ -12,19 +12,24 @@ __m128i broadcastss(const uint16_t* data) {
     return result;
 }
 
+__m128i xor3(__m128i a, __m128i b, __m128i c) {
+    return _mm_ternarylogic_epi64(a, b, c, 0x96);
+}
+
 __m128i pack60x2_4(const uint16_t* data) {
     __m128i shift4  = _mm_setr_epi32(1u <<  4, 0, 1u << ( 4+16), 0);
     __m128i shift14 = _mm_setr_epi32(1u << 14, 0, 1u << (14+16), 0);
     __m128i shift34 = _mm_setr_epi32(0, 1u <<  2, 0, 1u << ( 2+16));
     __m128i shift44 = _mm_setr_epi32(0, 1u << 12, 0, 1u << (12+16));
     __m128i result, hi;
-    result  = _mm_madd_epi16(broadcastss(data     ), shift4);
-    result ^= _mm_madd_epi16(broadcastss(data +  2), shift14);
-    hi      = _mm_madd_epi16(broadcastss(data +  4), shift4);
-    result ^= _mm_madd_epi16(broadcastss(data +  6), shift34);
-    result ^= _mm_madd_epi16(broadcastss(data +  8), shift44);
-    hi     ^= _mm_madd_epi16(broadcastss(data + 10), shift34);
-    result ^= _mm_slli_epi64(hi, 20);
+    result = xor3(_mm_madd_epi16(broadcastss(data     ), shift4),
+                  _mm_madd_epi16(broadcastss(data +  2), shift14),
+                  _mm_madd_epi16(broadcastss(data +  6), shift34));
+    hi     =      _mm_madd_epi16(broadcastss(data +  4), shift4)
+           ^      _mm_madd_epi16(broadcastss(data + 10), shift34);
+    result = xor3(result,
+                  _mm_madd_epi16(broadcastss(data +  8), shift44),
+                  _mm_slli_epi64(hi, 20));
     return result;
 }
 
@@ -32,13 +37,14 @@ __m128i pack60x2_0(const uint16_t* data) {
     __m128i shift10 = _mm_setr_epi32(1u << 10, 0, 1u << (10+16), 0);
     __m128i shift40 = _mm_setr_epi32(0, 1u << 8, 0, 1u << (8+16));
     __m128i result, hi;
-    result  =                   pmovzxwq(data     );
-    result ^= _mm_madd_epi16(broadcastss(data +  2), shift10);
-    hi      =                   pmovzxwq(data +  4);
-    hi     ^= _mm_madd_epi16(broadcastss(data +  6), shift10);
-    result ^= _mm_slli_epi64(hi, 20);
-    result ^= _mm_madd_epi16(broadcastss(data +  8), shift40);
-    result ^= _mm_slli_epi64(   pmovzxwq(data + 10), 50);
+    hi     =                        pmovzxwq(data +  4)
+           ^      _mm_madd_epi16(broadcastss(data +  6), shift10);
+    result = xor3(                  pmovzxwq(data     ),
+                  _mm_madd_epi16(broadcastss(data +  2), shift10),
+                  _mm_slli_epi64(hi, 20));
+    result = xor3(result,
+                  _mm_madd_epi16(broadcastss(data +  8), shift40),
+                  _mm_slli_epi64(   pmovzxwq(data + 10), 50));
     return result;
 }
 
@@ -57,19 +63,19 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
         y = _mm_clmulepi64_si128(y, k, 0x00);
     }
     for (size_t i = 0; i < n; i += 24) {
-        { // *= x^120 semi-mod P
-            __m128i k = _mm_setr_epi32(
-                0, 0x4b334000 /* x^120+64-1 mod P */,
-                0, 0x96d30000 /* x^120-1    mod P */);
-            c = xor_clmul(c, k);
-            y = xor_clmul(y, k);
-        }
-        { // +=
-            __m128i lo = pack60x2_4(data + i);
-            __m128i hi = pack60x2_0(data + i + 12);
-            c = _mm_xor_si128(c, _mm_unpacklo_epi64(lo, hi));
-            y = _mm_xor_si128(y, _mm_unpackhi_epi64(lo, hi));
-        }
+        // *= x^120 semi-mod P
+        // +=
+        __m128i lo = pack60x2_4(data + i);
+        __m128i hi = pack60x2_0(data + i + 12);
+        __m128i k = _mm_setr_epi32(
+            0, 0x4b334000 /* x^120+64-1 mod P */,
+            0, 0x96d30000 /* x^120-1    mod P */);
+        c = xor3(_mm_clmulepi64_si128(c, k, 0x00),
+                 _mm_clmulepi64_si128(c, k, 0x11),
+                 _mm_unpacklo_epi64(lo, hi));
+        y = xor3(_mm_clmulepi64_si128(y, k, 0x00),
+                 _mm_clmulepi64_si128(y, k, 0x11),
+                 _mm_unpackhi_epi64(lo, hi));
     }
     { // *= x^14 semi-mod P
         __m128i k = _mm_setr_epi32(
