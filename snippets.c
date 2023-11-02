@@ -43,9 +43,10 @@ polynomial pack120(const polynomial* data) {
 }
 
 polynomial pack60(const polynomial* data) {
-    polynomial result = 0;
-    for (size_t i = 0; i < 12; i += 2) {
-        result = result * x10 + data[i];
-    }
-    return result;
+    return data[ 0] * x50 +
+           data[ 2] * x40 +
+           data[ 4] * x30 +
+           data[ 6] * x20 +
+           data[ 8] * x10 +
+           data[10];
 }
