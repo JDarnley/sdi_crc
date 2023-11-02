@@ -3,6 +3,13 @@ __m128i xor_clmul(__m128i a, __m128i b) {
                          _mm_clmulepi64_si128(a, b, 0x11));
 }
 
+__m256i broadcast128(const uint16_t* data) {
+    __m256i result;
+    asm("vbroadcasti128 %1, %0" : "=x"(result) :
+                                   "m"(*(const __m128i*)data));
+    return result;
+}
+
 void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
     __m128i c = _mm_cvtsi32_si128(crcs[0]);
     __m128i y = _mm_cvtsi32_si128(crcs[1]);
@@ -22,31 +29,44 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
         }
         { // +=
             __m128i d1 = _mm_loadu_si128((__m128i*)(data + i));
-            __m128i d2 = _mm_loadu_si128((__m128i*)(data + i + 8));
-            __m128i d3 = _mm_loadu_si128((__m128i*)(data + i + 16));
-            __m128i k1 = _mm_setr_epi16(16, 16, 64, 64, 1, 1, 4, 4);
-            __m128i k2 = _mm_setr_epi16(16,  0, 64,  0, 1, 0, 4, 0);
-            __m128i k3 = _mm_setr_epi16( 0, 16,  0, 64, 0, 1, 0, 4);
+            __m256i d2 = broadcast128(data + i + 8);
+            __m256i d3 = broadcast128(data + i + 16);
+            __m128i k1 = _mm_setr_epi16(
+                16, 16, 64, 64, 1, 1, 4, 4);
+            __m256i k23 = _mm256_setr_epi16(
+                16,  0, 64,  0, 1, 0, 4, 0,
+                 0, 16,  0, 64, 0, 1, 0, 4);
             d1 = _mm_mullo_epi16(k1, d1);
-            __m128i k4=_mm_setr_epi8( 0, 1, -1,  8,  9, -1, -1, -1,
-                                      2, 3, -1, 10, 11, -1, -1, -1);
-            __m128i k5=_mm_setr_epi8(-1, 4,  5, -1, 12, 13, -1, -1,
-                                     -1, 6,  7, -1, 14, 15, -1, -1);
+            __m128i k4 = _mm_setr_epi8(
+                0,  1, -1,  8,  9, -1, -1, -1,
+                2,  3, -1, 10, 11, -1, -1, -1);
+            __m128i k5 = _mm_setr_epi8(
+                -1, 4,  5, -1, 12, 13, -1, -1,
+                -1, 6,  7, -1, 14, 15, -1, -1);
             d1 = _mm_shuffle_epi8(d1, k4) ^ _mm_shuffle_epi8(d1, k5);
             __m128i d1m; // Force a store to memory
             asm("vmovdqa %1, %0" : "=m"(d1m) : "x"(d1) : "memory");
-            __m128i cd = _mm_packus_epi32(_mm_madd_epi16(d2, k2),
-                                          _mm_madd_epi16(d3, k2));
-            __m128i yd = _mm_packus_epi32(_mm_madd_epi16(d2, k3),
-                                          _mm_madd_epi16(d3, k3));
-            __m128i k6=_mm_setr_epi8(-1, -1, -1, -1, -1,  0,  1, -1,
-                                      4,  5,  8,  9, -1, 12, 13, -1);
-            __m128i k7=_mm_setr_epi8(-1, -1, -1, -1, -1, -1,  2,  3,
-                                     -1,  6,  7, 10, 11, -1, 14, 15);
-            cd = _mm_shuffle_epi8(cd, k6) ^ _mm_shuffle_epi8(cd, k7)
-               ^ _mm_loadu_si64(&d1m);
-            yd = _mm_shuffle_epi8(yd, k6) ^ _mm_shuffle_epi8(yd, k7)
-               ^ _mm_loadu_si64(8 + (char*)&d1m);
+            __m256i cdyd = _mm256_packus_epi32(
+                _mm256_madd_epi16(d2, k23),
+                _mm256_madd_epi16(d3, k23));
+            __m256i k6 = _mm256_setr_epi8(
+                -1, -1, -1, -1, -1,  0,  1, -1,
+                 4,  5,  8,  9, -1, 12, 13, -1,
+                -1, -1, -1, -1, -1,  0,  1, -1,
+                 4,  5,  8,  9, -1, 12, 13, -1);
+            __m256i k7 = _mm256_setr_epi8(
+                -1, -1, -1, -1, -1, -1,  2,  3,
+                -1,  6,  7, 10, 11, -1, 14, 15,
+                -1, -1, -1, -1, -1, -1,  2,  3,
+                -1,  6,  7, 10, 11, -1, 14, 15);
+            cdyd = _mm256_shuffle_epi8(cdyd, k6)
+                 ^ _mm256_shuffle_epi8(cdyd, k7);
+            __m256i m; // Force a store to memory
+            asm("vmovdqa %1, %0" : "=m"(m) : "x"(cdyd) : "memory");
+            __m128i cd = _mm256_castsi256_si128(cdyd)
+                       ^ _mm_loadu_si64(&d1m);
+            __m128i yd = _mm_loadu_si128(1 + (__m128i*)&m)
+                       ^ _mm_loadu_si64(8 + (char*)&d1m);
             c = _mm_xor_si128(c, cd);
             y = _mm_xor_si128(y, yd);
         }
