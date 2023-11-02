@@ -24,18 +24,18 @@ void crc_sdi(uint32_t* crcs, const uint16_t* data, size_t n) {
 }
 
 void crc_sdi(polynomial* crcs, const polynomial* data, size_t n) {
-    polynomial c = crcs[0] * x-18;
-    polynomial y = crcs[1] * x-18;
+    polynomial c = crcs[0] * x-14;
+    polynomial y = crcs[1] * x-14;
     for (size_t i = 0; i < n; i += 24) {
         c = c * x120 + pack120(data + i);
         y = y * x120 + pack120(data + i + 1);
     }
-    crcs[0] = (c * x18) mod P;
-    crcs[1] = (y * x18) mod P;
+    crcs[0] = (c * x14) mod P;
+    crcs[1] = (y * x14) mod P;
 }
 
 polynomial pack120(const polynomial* data) {
-    return pack60(data) * x60 + pack60(data + 12);
+    return pack60(data) * x64 + pack60(data + 12) * x4;
 }
 
 polynomial pack60(const polynomial* data) {
